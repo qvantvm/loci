@@ -33,6 +33,7 @@ class ContentReader(QWidget):
     """Render the selected section with strict source/AI separation."""
 
     section_changed = Signal(str, str)
+    artifact_requested = Signal(str)
 
     def __init__(self, storage: StorageService) -> None:
         super().__init__()

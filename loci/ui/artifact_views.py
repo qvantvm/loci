@@ -5,14 +5,23 @@ from __future__ import annotations
 from PySide6.QtWidgets import QDialog, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from loci.models.schemas import AIArtifact
+from loci.services.storage_service import StorageService
 from loci.ui.widgets import Card, LabelPill
 
 
 class ArtifactDialog(QDialog):
     """Show generated summaries, FAQs, critiques, and takeaways."""
 
-    def __init__(self, title: str, artifacts: list[AIArtifact], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        storage: StorageService,
+        document_id: str,
+        artifact_type: str,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        title = artifact_type.title()
+        artifacts = storage.list_artifacts(document_id=document_id, artifact_type=artifact_type)
         self.setWindowTitle(title)
         self.resize(760, 620)
         content = QWidget()

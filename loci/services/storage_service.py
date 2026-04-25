@@ -61,6 +61,12 @@ class StorageService:
         self.db_path = Path(db_path) if db_path is not None else self.data_dir / "loci.sqlite"
         initialize_database(self.db_path)
 
+    @classmethod
+    def default(cls) -> "StorageService":
+        """Return storage backed by the package data directory."""
+
+        return cls()
+
     def connection(self) -> sqlite3.Connection:
         return connect(self.db_path)
 

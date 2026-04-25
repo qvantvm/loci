@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -21,6 +22,8 @@ from loci.ui.widgets import Card, LabelValue
 
 class DiscussionPane(QWidget):
     """Threaded discussion for the currently selected section."""
+
+    messages_changed = Signal()
 
     def __init__(self, storage: StorageService, rce: RecursiveContextEngine, openai: OpenAIService) -> None:
         super().__init__()
@@ -110,6 +113,7 @@ class DiscussionPane(QWidget):
         self.storage.create_message(message)
         self.input.clear()
         self.refresh()
+        self.messages_changed.emit()
 
     def _ask_agent(self, role: AgentRole) -> None:
         if not self.section_id or not self.thread_id:
@@ -126,6 +130,7 @@ class DiscussionPane(QWidget):
         )
         self.storage.create_message(message)
         self.refresh()
+        self.messages_changed.emit()
 
     def _ask_all(self) -> None:
         for role in (AgentRole.EXPERT, AgentRole.CRITIQUE, AgentRole.INEXPERT):

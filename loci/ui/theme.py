@@ -92,3 +92,9 @@ QLabel#Badge {
 
 def stylesheet(dark: bool = True) -> str:
     return DARK_STYLE if dark else LIGHT_STYLE
+
+
+def apply_theme(widget, dark: bool = True) -> None:
+    """Apply the selected Loci stylesheet to a widget tree."""
+
+    widget.setStyleSheet(stylesheet(dark))

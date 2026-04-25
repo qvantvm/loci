@@ -1,0 +1,14 @@
+PySide6>=6.7
+pydantic>=2.7
+python-dotenv>=1.0
+openai>=1.30
+PyMuPDF>=1.24
+markdown-it-py>=3.0
+
+[dev]
+pytest>=8.0
+
+[webengine]
+
+[webengine:python_version < "3.12"]
+PySide6-WebEngine>=6.7
