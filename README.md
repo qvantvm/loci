@@ -1,1 +1,124 @@
-# loci
+# Loci
+
+Loci is a Python desktop knowledge-base app for reading, preserving, analyzing,
+and discussing technical documents. It follows a strict source/AI separation
+model: original user content is stored immutably, while every generated summary,
+FAQ, critique, takeaway, and agent message is saved as a separate grounded
+artifact.
+
+## What is included
+
+- PySide6 three-pane desktop UI:
+  - left knowledge library and section navigator
+  - center content reader with original/AI cards, figures, and MathJax-capable equations
+  - right Slack-like section discussion with Expert, Critique, and Inexpert agents
+- SQLite metadata store plus local file storage under `loci/data/`
+- Pydantic schemas for documents, sections, figures, equations, artifacts, threads, and messages
+- TXT, Markdown, pasted-text, and best-effort PDF ingestion
+- Immutable source file persistence with SHA-256 hashes
+- Heuristic/offline artifact generation when `OPENAI_API_KEY` is not configured
+- OpenAI service layer ready for richer structured-output extraction/generation
+- Recursive Context Engine with controlled tools, citations, recursion/tool limits, and trace logging
+- Minimal automated tests for storage, ingestion, grounding, and recursive context behavior
+
+## Install
+
+```bash
+python3 -m pip install --user -e ".[dev]"
+```
+
+Optional OpenAI setup:
+
+```bash
+cp .env.example .env
+# edit .env and set OPENAI_API_KEY
+```
+
+Loci runs without an API key using deterministic fallback summaries and agent
+responses.
+
+## Launch
+
+```bash
+python3 app.py
+# or, after installation:
+loci
+```
+
+If your Linux desktop environment is headless or lacks Qt WebEngine support, the
+non-UI services and tests still run; equation rendering falls back to text when
+WebEngine is unavailable.
+
+## Test
+
+```bash
+python3 -m pytest
+```
+
+Current validation:
+
+```text
+6 passed
+```
+
+## Manual smoke test
+
+1. Launch the app.
+2. Click **Paste**, enter Markdown or raw text, and ingest it.
+3. Confirm the document appears in the left library.
+4. Expand the document, click a section, and verify:
+   - original section text is shown in an **Original** card
+   - the AI summary is shown separately
+   - equations/figures area is present when extracted
+5. Open **Whole Summary**, **FAQ**, **Critique**, and **Takeaways**.
+6. Ask a section question and use **Ask Expert**, **Ask Critic**, **Ask Beginner**, or **Ask All**.
+7. Confirm agent replies include grounding references to the selected section.
+
+## Architecture
+
+```text
+loci/
+  app.py                         # package entry point
+  ui/                            # PySide6 panes, dialogs, theme, widgets
+  models/                        # Pydantic schemas + SQLite schema init
+  services/
+    storage_service.py           # CRUD + immutable source/crop/artifact folders
+    ingestion_pipeline.py        # parse -> store -> embed -> artifact pipeline
+    markdown_service.py          # Markdown/TXT/paste heading spans
+    pdf_service.py               # PyMuPDF page text, images, equations
+    openai_service.py            # OpenAI facade + offline fallbacks
+    embedding_service.py         # OpenAI/fallback vectors
+    search_service.py            # scoped section search
+    grounding_service.py         # lexical grounding checks
+    recursive_context_engine.py  # controlled recursive tools and citations
+  prompts/                       # versioned prompt Markdown files
+  data/                          # local runtime data
+```
+
+## Source vs AI separation
+
+Original source content is never silently rewritten. Uploaded files and pasted
+text are copied into `loci/data/sources/` with a content hash. Sections store
+verbatim source slices. Generated content is persisted as `AIArtifact` or
+`DiscussionMessage` records with model, prompt version, timestamp, confidence,
+and grounding metadata.
+
+## PDF notes
+
+PDF extraction is best-effort because layout and embedded images vary by file.
+The current implementation extracts page text with PyMuPDF, identifies image
+blocks/crops when available, detects nearby captions heuristically, and records
+obvious equation-like lines as MathJax candidates with confidence metadata.
+
+## Data location
+
+By default runtime data is stored in:
+
+```text
+loci/data/loci.sqlite
+loci/data/sources/
+loci/data/crops/
+loci/data/artifacts/
+```
+
+Tests use temporary directories and do not modify the default app database.
