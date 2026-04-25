@@ -16,6 +16,12 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def iso_now() -> datetime:
+    """Backward-compatible alias for the app's UTC timestamp factory."""
+
+    return utc_now()
+
+
 def new_id(prefix: str) -> str:
     """Create a compact, prefixed UUID identifier."""
 

@@ -6,6 +6,8 @@ import re
 from collections import Counter
 from typing import Iterable
 
+from typing import TypedDict
+
 from loci.models.schemas import Section
 
 
@@ -19,6 +21,12 @@ def tokenize(text: str) -> list[str]:
     return [token.lower() for token in TOKEN_RE.findall(text) if len(token) > 2]
 
 
+class GroundingResult(TypedDict):
+    references: list[dict]
+    warnings: list[str]
+    confidence: float
+
+
 class GroundingService:
     """Map generated claims back to source sections using lexical overlap.
 
@@ -26,7 +34,7 @@ class GroundingService:
     but it provides a transparent first-pass warning system and source links.
     """
 
-    def check_artifact_grounding(self, content: str, candidate_sections: Iterable[Section]) -> tuple[list[dict], list[str], float]:
+    def check_artifact_grounding(self, content: str, candidate_sections: Iterable[Section]) -> GroundingResult:
         sections = list(candidate_sections)
         warnings: list[str] = []
         references: list[dict] = []
@@ -35,7 +43,7 @@ class GroundingService:
         section_tokens = {section.id: Counter(tokenize(section.verbatim_content)) for section in sections}
         sentences = [sentence.strip() for sentence in SENTENCE_RE.split(content) if sentence.strip()]
         if not sentences or not sections:
-            return [], ["No source sections available for grounding."], 0.0
+            return {"references": [], "warnings": ["No source sections available for grounding."], "confidence": 0.0}
 
         for sentence in sentences:
             claim_tokens = set(tokenize(sentence))
@@ -66,7 +74,7 @@ class GroundingService:
                 warnings.append(f"Low grounding confidence for claim: {sentence[:160]}")
 
         confidence = sum(sentence_scores) / max(1, len(sentence_scores))
-        return references, warnings, min(1.0, confidence)
+        return {"references": references, "warnings": warnings, "confidence": min(1.0, confidence)}
 
     def validate_answer(self, answer: str, references: list[dict]) -> tuple[bool, list[str]]:
         """Validate that a generated answer carries at least one source citation."""

@@ -15,7 +15,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from loci.models.schemas import AIArtifact, DiscussionMessage, Section, SectionCandidate, new_id
+from loci.models.schemas import AIArtifact, DiscussionMessage, Section, SectionCandidate, iso_now, new_id
 from loci.services.grounding_service import GroundingService
 
 
@@ -30,6 +30,17 @@ class OpenAIService:
         self.model = model if self.api_key else "fallback-local"
         self.prompts_dir = Path(prompts_dir) if prompts_dir else Path(__file__).resolve().parents[1] / "prompts"
         self.grounding = GroundingService()
+        self.client = None
+        self.enabled = False
+        if self.api_key:
+            try:
+                from openai import OpenAI
+
+                self.client = OpenAI(api_key=self.api_key)
+                self.enabled = True
+            except Exception:
+                self.client = None
+                self.enabled = False
 
     @property
     def has_api_key(self) -> bool:
@@ -106,36 +117,34 @@ class OpenAIService:
     def generate_document_artifact(self, artifact_type: str, document_id: str, sections: list[Section]) -> AIArtifact:
         content = self._fallback_artifact_content(artifact_type, sections)
         grounding = self.grounding.check_artifact_grounding(content, sections)
-        confidence = min([g.get("confidence", 0.35) for g in grounding] or [0.35])
+        confidence = grounding["confidence"]
         return AIArtifact(
             id=new_id("art"),
             document_id=document_id,
             section_id=None,
             artifact_type=artifact_type,  # type: ignore[arg-type]
             content=content,
-            grounding=grounding,
+            grounding=grounding["references"],
             model=self.model,
             prompt_version=self.prompt_version,
             created_at=iso_now(),
             confidence=confidence,
-            metadata={"source": "openai" if self.has_api_key else "fallback", "warnings": [g for g in grounding if g.get("warning")]},
+            metadata={"source": "openai" if self.has_api_key else "fallback", "warnings": grounding["warnings"]},
         )
 
     def generate_section_summary(self, section_text: str) -> str:
         return self.summarize_text(section_text)
 
-    def generate_summary(self, document_or_section: Any) -> AIArtifact | str:
-        if isinstance(document_or_section, Section):
-            return self.generate_section_summary(document_or_section.verbatim_content)
-        raise TypeError("generate_summary expects a Section in this first-version service")
+    def generate_summary(self, document_id: str, raw_text: str, sections: list[Section]) -> AIArtifact:
+        return self.generate_document_artifact("summary", document_id, sections)
 
-    def generate_faq(self, document_id: str, sections: list[Section]) -> AIArtifact:
+    def generate_faq(self, document_id: str, raw_text: str, sections: list[Section]) -> AIArtifact:
         return self.generate_document_artifact("faq", document_id, sections)
 
-    def generate_critique(self, document_id: str, sections: list[Section]) -> AIArtifact:
+    def generate_critique(self, document_id: str, raw_text: str, sections: list[Section]) -> AIArtifact:
         return self.generate_document_artifact("critique", document_id, sections)
 
-    def generate_takeaways(self, document_id: str, sections: list[Section]) -> AIArtifact:
+    def generate_takeaways(self, document_id: str, raw_text: str, sections: list[Section]) -> AIArtifact:
         return self.generate_document_artifact("takeaways", document_id, sections)
 
     def agent_reply(self, agent_role: str, thread_context: dict[str, Any], user_message: str) -> DiscussionMessage:

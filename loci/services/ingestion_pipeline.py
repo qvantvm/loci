@@ -36,8 +36,8 @@ class IngestionPipeline:
     ) -> None:
         self.storage = storage or StorageService()
         self.openai = openai_service or OpenAIService()
-        self.markdown = markdown_service or MarkdownService(self.openai)
-        self.pdf = pdf_service or PDFService(self.storage.crops_dir, self.openai)
+        self.markdown = markdown_service or MarkdownService()
+        self.pdf = pdf_service or PDFService(self.storage.crops_dir)
         self.embeddings = embedding_service or EmbeddingService(self.storage, self.openai)
         self.grounding = grounding_service or GroundingService()
 

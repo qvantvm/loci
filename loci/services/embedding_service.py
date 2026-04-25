@@ -19,9 +19,10 @@ class EmbeddingService:
         self.openai = openai_service or OpenAIService()
 
     def embed_text(self, text: str) -> tuple[list[float], str]:
-        if self.openai.enabled and self.openai.client is not None:
+        client = getattr(self.openai, "client", None)
+        if self.openai.has_api_key and client is not None:
             try:
-                response = self.openai.client.embeddings.create(model="text-embedding-3-small", input=text[:8000])
+                response = client.embeddings.create(model="text-embedding-3-small", input=text[:8000])
                 return list(response.data[0].embedding), "text-embedding-3-small"
             except Exception:
                 pass
@@ -31,6 +32,19 @@ class EmbeddingService:
         vector, model = self.embed_text(text)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         self.storage.save_embedding("section", section_id, digest, model, vector)
+
+    def embed_and_store(
+        self,
+        owner_type: str,
+        owner_id: str,
+        text: str,
+        embedding_type: str = "content",
+    ) -> None:
+        """Generate and persist an embedding for any supported owner."""
+
+        vector, model = self.embed_text(text)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self.storage.save_embedding(owner_type, owner_id, digest, model, vector, embedding_type=embedding_type)
 
     def _fallback_vector(self, text: str, dimensions: int = 64) -> list[float]:
         vector = [0.0] * dimensions
