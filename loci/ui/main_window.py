@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QToolBar,
@@ -116,11 +117,21 @@ class MainWindow(QMainWindow):
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo)
 
-        for label in ("KB", "AI", "SR"):
-            item = QLabel(label)
-            item.setObjectName("railItem")
-            item.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(item)
+        kb = QLabel("KB")
+        kb.setObjectName("railItem")
+        kb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(kb)
+
+        ai = QPushButton("AI")
+        ai.setObjectName("railButton")
+        ai.setToolTip("Open AI interaction log")
+        ai.clicked.connect(self.show_ai_log)
+        layout.addWidget(ai)
+
+        sr = QLabel("SR")
+        sr.setObjectName("railItem")
+        sr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(sr)
         layout.addStretch(1)
         return rail
 

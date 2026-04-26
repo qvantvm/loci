@@ -31,6 +31,23 @@ QLabel#railItem:hover {
     background: #1B1F28;
     color: #F2F3F5;
 }
+QPushButton#railButton {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: #8D96A5;
+    font-weight: 650;
+    min-height: 34px;
+    padding: 0;
+}
+QPushButton#railButton:hover {
+    background: #1B1F28;
+    color: #F2F3F5;
+}
+QPushButton#railButton:pressed {
+    background: #26324A;
+    color: #FFFFFF;
+}
 QToolBar#topBar {
     background: #111318;
     border: 0;
