@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self.pipeline = IngestionPipeline(self.storage, self.openai)
         self.rce = RecursiveContextEngine(self.storage, openai=self.openai)
         self.current_section_id: str | None = None
-        self.dark = False
+        self.dark = True
 
         self.library = LeftLibraryPane(self.storage)
         self.reader = ContentReader(self.storage)
@@ -52,16 +52,20 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.reader)
         splitter.addWidget(self.discussion)
         splitter.setSizes([320, 680, 420])
+        splitter.setChildrenCollapsible(False)
         self.setCentralWidget(splitter)
 
         self._build_toolbar()
-        apply_theme(self, dark=False)
+        apply_theme(self, dark=True)
         self.setWindowTitle("Loci — Visual AI Knowledge Base")
         self.resize(1440, 920)
         self._ensure_demo_content()
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Loci")
+        toolbar.setObjectName("topBar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
         self.addToolBar(toolbar)
         toolbar.addAction("Upload File", self.upload_file)
         toolbar.addAction("Paste Text", self.paste_text)

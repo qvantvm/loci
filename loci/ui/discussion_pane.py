@@ -34,7 +34,10 @@ class DiscussionPane(QWidget):
         self.thread_id: str | None = None
 
         self.title = QLabel("Section Discussion")
+        self.title.setObjectName("PaneTitle")
         self.messages = QVBoxLayout()
+        self.messages.setContentsMargins(0, 0, 0, 0)
+        self.messages.setSpacing(10)
         self.messages.addStretch()
         message_holder = QWidget()
         message_holder.setLayout(self.messages)
@@ -58,10 +61,14 @@ class DiscussionPane(QWidget):
         ask_all.clicked.connect(self._ask_all)
 
         buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
         for button in (ask_user, ask_expert, ask_critic, ask_beginner, ask_all):
             buttons.addWidget(button)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 14, 14, 14)
+        layout.setSpacing(10)
         layout.addWidget(self.title)
         layout.addWidget(scroll)
         layout.addWidget(self.input)

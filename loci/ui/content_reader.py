@@ -48,6 +48,8 @@ class ContentReader(QWidget):
 
         self.artifact_buttons: dict[str, QPushButton] = {}
         artifact_row = QHBoxLayout()
+        artifact_row.setContentsMargins(0, 0, 0, 0)
+        artifact_row.setSpacing(8)
         for artifact_type, label in {
             "summary": "Whole Summary",
             "faq": "FAQ",
@@ -61,7 +63,10 @@ class ContentReader(QWidget):
 
         body = QWidget()
         self.body_layout = QVBoxLayout(body)
+        self.body_layout.setContentsMargins(16, 14, 16, 14)
+        self.body_layout.setSpacing(12)
         title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
         self.title = QLabel("Loci Reader")
         self.title.setObjectName("PaneTitle")
         title_row.addWidget(self.title)
@@ -79,6 +84,7 @@ class ContentReader(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(body)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(scroll)
 
     @staticmethod
@@ -122,7 +128,10 @@ class ContentReader(QWidget):
             return
         for figure in figures:
             frame = QFrame()
+            frame.setObjectName("card")
             inner = QVBoxLayout(frame)
+            inner.setContentsMargins(12, 12, 12, 12)
+            inner.setSpacing(8)
             self._add_figure_image(inner, figure.crop_path)
             inner.addWidget(LabelValue("Figure ID", figure.id))
             inner.addWidget(LabelValue("Caption", figure.caption or "No source caption detected."))
@@ -160,8 +169,11 @@ class ContentReader(QWidget):
             self.equations.addWidget(self._equation_widget(equation))
 
     def _equation_widget(self, equation: Equation) -> QWidget:
-        container = QWidget()
+        container = QFrame()
+        container.setObjectName("card")
         layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         layout.addWidget(LabelValue("Equation ID", equation.id))
         toggle = QCheckBox("Show source / MathJax")
         source = QLabel(

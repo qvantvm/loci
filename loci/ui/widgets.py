@@ -18,8 +18,8 @@ class Card(QFrame):
         super().__init__(parent)
         self.setObjectName("card")
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(14, 12, 14, 12)
-        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(14, 14, 14, 14)
+        self._layout.setSpacing(10)
 
         if isinstance(body, str) and badge is None:
             badge = body
@@ -32,6 +32,8 @@ class Card(QFrame):
 
     def add_header(self, title: str, badge: QWidget | None = None) -> None:
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
         heading = QLabel(title)
         heading.setObjectName("cardTitle")
         row.addWidget(heading)
