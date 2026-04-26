@@ -25,6 +25,7 @@ from loci.services.ingestion_pipeline import IngestionPipeline
 from loci.services.openai_service import OpenAIService
 from loci.services.recursive_context_engine import RecursiveContextEngine
 from loci.services.storage_service import StorageService
+from loci.ui.ai_interaction_log import AIInteractionLogDialog
 from loci.ui.artifact_views import ArtifactDialog
 from loci.ui.content_reader import ContentReader
 from loci.ui.discussion_pane import DiscussionPane
@@ -98,6 +99,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(spacer)
         toolbar.addAction("Upload File", self.upload_file)
         toolbar.addAction("Paste Text", self.paste_text)
+        toolbar.addAction("AI Log", self.show_ai_log)
         toolbar.addAction("Refresh", self.refresh)
         toolbar.addAction("Toggle Theme", self.toggle_theme)
 
@@ -130,6 +132,10 @@ class MainWindow(QMainWindow):
     def toggle_theme(self) -> None:
         self.dark = not self.dark
         apply_theme(self, self.dark)
+
+    def show_ai_log(self) -> None:
+        dialog = AIInteractionLogDialog(self.storage, self)
+        dialog.exec()
 
     def open_section(self, section_id: str) -> None:
         self.current_section_id = section_id
