@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from loci.models.schemas import AgentScratchpad, AgentScratchpadEntry, GroundedAnswer, Scope, Section
 from loci.services.grounding_service import GroundingService
-from loci.services.openai_service import OpenAIService
+from loci.services.openai_service import AIProvider, OpenAIService
 from loci.services.recursive_context_engine import RecursiveContextEngine
 from loci.services.storage_service import StorageService
 
@@ -34,11 +34,26 @@ class AgentOrchestrator:
         self.rce = rce or RecursiveContextEngine(storage)
         self.openai = openai or OpenAIService()
         self.grounding = grounding or GroundingService()
+        self.dream_provider: AIProvider = "fallback"
+        self.dream_openai = OpenAIService.for_dreaming(self.dream_provider)
 
-    def run_dream_cycle(self, scope: Scope | None = None, max_iterations: int = 10) -> AgentRunResult:
+    def set_dream_provider(self, provider: AIProvider) -> None:
+        """Switch dream-cycle generation between LM Studio, OpenAI, and fallback."""
+
+        self.dream_provider = provider
+        self.dream_openai = OpenAIService.for_dreaming(provider)
+
+    def run_dream_cycle(
+        self,
+        scope: Scope | None = None,
+        max_iterations: int = 10,
+        provider: AIProvider | None = None,
+    ) -> AgentRunResult:
         """Let agents discuss stored content and persist grounded Expert-approved output."""
 
         scope = scope or Scope()
+        if provider is not None:
+            self.set_dream_provider(provider)
         max_iterations = self._clamp_iterations(max_iterations)
         scratchpad = self.storage.create_scratchpad(
             AgentScratchpad(
@@ -48,7 +63,12 @@ class AgentOrchestrator:
                 section_id=scope.section_id,
                 question="Dream over saved Loci content and surface grounded questions, gaps, and synthesis.",
                 max_iterations=max_iterations,
-                metadata={"scope": scope.model_dump()},
+                metadata={
+                    "scope": scope.model_dump(),
+                    "dream_provider": self.dream_provider,
+                    "dream_model": self.dream_openai.model,
+                    "dream_base_url": self.dream_openai.base_url,
+                },
             )
         )
         result = self._run_agent_loop(
@@ -95,13 +115,14 @@ class AgentOrchestrator:
                 grounding_refs = evidence.citations
                 sections = self._sections_for_grounding(scope, grounding_refs)
 
-                beginner = self._beginner_entry(scratchpad.id, iteration, question, evidence)
+                dream_service = self.dream_openai if scratchpad.kind == "dream" else self.openai
+                beginner = self._beginner_entry(scratchpad.id, iteration, question, evidence, dream_service)
                 self.storage.create_scratchpad_entry(beginner)
 
-                critic = self._critic_entry(scratchpad.id, iteration, evidence)
+                critic = self._critic_entry(scratchpad.id, iteration, evidence, dream_service)
                 self.storage.create_scratchpad_entry(critic)
 
-                candidate = self._expert_candidate(question, evidence, critic.content, scratchpad.kind)
+                candidate = self._expert_candidate(question, evidence, critic.content, scratchpad.kind, dream_service)
                 grounding = self.grounding.check_artifact_grounding(candidate, sections)
                 confidence = grounding["confidence"]
                 final_answer = candidate
@@ -113,7 +134,12 @@ class AgentOrchestrator:
                     content=self._expert_decision(candidate, confidence, grounding["warnings"]),
                     grounding=grounding["references"] or grounding_refs,
                     confidence=confidence,
-                    metadata={"warnings": grounding["warnings"], "model": self.openai.model},
+                    metadata={
+                        "warnings": grounding["warnings"],
+                        "model": dream_service.model,
+                        "provider": dream_service.provider,
+                        "base_url": dream_service.base_url,
+                    },
                 )
                 self.storage.create_scratchpad_entry(expert)
 
@@ -163,10 +189,20 @@ class AgentOrchestrator:
         iteration: int,
         question: str,
         evidence: GroundedAnswer,
+        service: OpenAIService,
     ) -> AgentScratchpadEntry:
-        content = (
+        fallback = (
             f"Beginner question for iteration {iteration}: What should a reader understand about "
             f"'{question}'? The clearest grounded clue is: {self._snippet(evidence.answer, 420)}"
+        )
+        content = service.complete(
+            self.openai.prompt("inexpert_agent") or "Ask grounded beginner questions.",
+            (
+                f"Question: {question}\n\nEvidence:\n{evidence.answer}\n\n"
+                "Write one concise beginner-oriented scratchpad note grounded in the evidence."
+            ),
+            fallback,
+            max_tokens=300,
         )
         return AgentScratchpadEntry(
             scratchpad_id=scratchpad_id,
@@ -176,16 +212,31 @@ class AgentOrchestrator:
             content=content,
             grounding=evidence.citations,
             confidence=evidence.confidence,
-            metadata={"model": evidence.model},
+            metadata={"model": service.model, "provider": service.provider, "base_url": service.base_url},
         )
 
-    def _critic_entry(self, scratchpad_id: str, iteration: int, evidence: GroundedAnswer) -> AgentScratchpadEntry:
-        content = (
+    def _critic_entry(
+        self,
+        scratchpad_id: str,
+        iteration: int,
+        evidence: GroundedAnswer,
+        service: OpenAIService,
+    ) -> AgentScratchpadEntry:
+        fallback = (
             "Critique: keep the final answer limited to cited source material, define ambiguous terms, "
             "and avoid any claim that cannot be traced to the retrieved sections."
         )
         if not evidence.citations:
-            content += " No citations were found, so the Expert should not approve new content."
+            fallback += " No citations were found, so the Expert should not approve new content."
+        content = service.complete(
+            self.openai.prompt("critique_agent") or "Critique source-grounded claims.",
+            (
+                f"Evidence:\n{evidence.answer}\n\nCitations: {evidence.citations}\n\n"
+                "Write one concise critique note for the shared scratchpad."
+            ),
+            fallback,
+            max_tokens=350,
+        )
         return AgentScratchpadEntry(
             scratchpad_id=scratchpad_id,
             actor="critique_agent",
@@ -194,19 +245,37 @@ class AgentOrchestrator:
             content=content,
             grounding=evidence.citations,
             confidence=evidence.confidence,
-            metadata={"model": evidence.model},
+            metadata={"model": service.model, "provider": service.provider, "base_url": service.base_url},
         )
 
-    def _expert_candidate(self, question: str, evidence: GroundedAnswer, critique: str, kind: str) -> str:
+    def _expert_candidate(
+        self,
+        question: str,
+        evidence: GroundedAnswer,
+        critique: str,
+        kind: str,
+        service: OpenAIService,
+    ) -> str:
         heading = "Dream Synthesis" if kind == "dream" else "Answer"
         citations = sorted({ref.get("section_id", "") for ref in evidence.citations if ref.get("section_id")})
         citation_text = ", ".join(citations) if citations else "No grounded section citations found"
-        return (
+        fallback = (
             f"# {heading}\n\n"
             f"## Question\n\n{question}\n\n"
             f"## Grounded Response\n\n{self._snippet(evidence.answer, 1400)}\n\n"
             f"## Critique Check\n\n{critique}\n\n"
             f"## Citations\n\n{citation_text}\n"
+        )
+        return service.complete(
+            self.openai.prompt("expert_agent") or "Synthesize grounded answers with citations.",
+            (
+                f"Question: {question}\n\nEvidence:\n{evidence.answer}\n\nCritique:\n{critique}\n\n"
+                f"Citation section ids: {citation_text}\n\n"
+                f"Write a Markdown {heading.lower()} with sections Question, Grounded Response, Critique Check, and Citations. "
+                "Do not add claims that are not supported by the evidence."
+            ),
+            fallback,
+            max_tokens=900,
         )
 
     @staticmethod

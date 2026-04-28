@@ -59,3 +59,20 @@ def test_dream_cycle_creates_generated_document_outside_sources(tmp_path):
     assert "/artifacts/generated_documents/" in generated.source_path
     assert "/sources/" not in generated.source_path
     assert storage.list_sections(generated.id)
+
+
+def test_dream_cycle_records_selected_provider(tmp_path):
+    storage, document_id, section_id = _seed_storage(tmp_path)
+    orchestrator = AgentOrchestrator(storage)
+
+    result = orchestrator.run_dream_cycle(
+        Scope(document_id=document_id, section_id=section_id),
+        max_iterations=1,
+        provider="local",
+    )
+
+    scratchpad = storage.get_scratchpad(result.scratchpad.id)
+    assert scratchpad is not None
+    assert scratchpad.metadata["dream_provider"] == "local"
+    entries = storage.list_scratchpad_entries(scratchpad.id)
+    assert any(entry.metadata.get("provider") == "local" for entry in entries)

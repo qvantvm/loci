@@ -21,7 +21,7 @@ from loci.models.schemas import AgentScratchpad, AgentScratchpadEntry, ContentRe
 from loci.services.agent_orchestrator import AgentOrchestrator
 from loci.services.consistency_service import ConsistencyService
 from loci.services.document_pipeline_service import DocumentPipelineService
-from loci.services.openai_service import OpenAIService
+from loci.services.openai_service import AIProvider, OpenAIService
 from loci.services.quick_actions_service import QuickActionsService
 from loci.services.recursive_context_engine import RecursiveContextEngine
 from loci.services.storage_service import StorageService
@@ -79,6 +79,10 @@ class DiscussionPane(QWidget):
 
         self.pipeline_combo = QComboBox()
         self.pipeline_combo.addItems(list(DocumentPipelineService.PIPELINES))
+        self.dream_provider_combo = QComboBox()
+        self.dream_provider_combo.addItem("Dream: LM Studio", "local")
+        self.dream_provider_combo.addItem("Dream: OpenAI", "openai")
+        self.dream_provider_combo.addItem("Dream: Fallback", "fallback")
         ask_question = QPushButton("Ask / Run")
         dream = QPushButton("Dream Cycle")
         ask_question.clicked.connect(self._run_composer)
@@ -88,6 +92,7 @@ class DiscussionPane(QWidget):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(6)
         controls.addWidget(self.pipeline_combo)
+        controls.addWidget(self.dream_provider_combo)
         controls.addWidget(ask_question)
         controls.addWidget(dream)
 
@@ -179,7 +184,7 @@ class DiscussionPane(QWidget):
             return
         section = self.storage.get_section(self.section_id)
         scope = Scope(document_id=section.document_id if section else None, section_id=self.section_id)
-        self.orchestrator.run_dream_cycle(scope, max_iterations=10)
+        self.orchestrator.run_dream_cycle(scope, max_iterations=10, provider=self._dream_provider())
         self.refresh()
         self.messages_changed.emit()
 
@@ -189,6 +194,10 @@ class DiscussionPane(QWidget):
         existing = self.storage.list_scratchpads(kind="dream", section_id=self.section_id, limit=1)
         if not existing:
             self._run_dream_cycle()
+
+    def _dream_provider(self) -> AIProvider:
+        value = self.dream_provider_combo.currentData()
+        return value if value in {"local", "openai", "fallback"} else "fallback"  # type: ignore[return-value]
 
     def _render_dreaming(self) -> None:
         pads = self.storage.list_scratchpads(kind="dream", section_id=self.section_id, limit=5) if self.section_id else []

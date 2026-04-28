@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 
@@ -19,15 +19,35 @@ from loci.models.schemas import AIArtifact, Section, SectionCandidate, iso_now, 
 from loci.services.grounding_service import GroundingService
 
 
+AIProvider = Literal["openai", "local", "fallback"]
+
+
 class OpenAIService:
     """Generation/extraction facade for Loci."""
 
     prompt_version = "1.0"
 
-    def __init__(self, prompts_dir: str | Path | None = None, model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        prompts_dir: str | Path | None = None,
+        model: str | None = None,
+        provider: AIProvider = "openai",
+        base_url: str | None = None,
+    ) -> None:
         load_dotenv()
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = model if self.api_key else "fallback-local"
+        self.provider = provider
+        self.base_url = base_url
+        if provider == "local":
+            self.api_key = os.getenv("LM_STUDIO_API_KEY") or "lm-studio"
+            self.base_url = base_url or os.getenv("LM_STUDIO_BASE_URL") or "http://localhost:1234/v1"
+            configured_model = model or os.getenv("LM_STUDIO_MODEL") or "local-model"
+        elif provider == "openai":
+            self.api_key = os.getenv("OPENAI_API_KEY")
+            configured_model = model or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+        else:
+            self.api_key = None
+            configured_model = "fallback-local"
+        self.model = configured_model if self.api_key else "fallback-local"
         self.prompts_dir = Path(prompts_dir) if prompts_dir else Path(__file__).resolve().parents[1] / "prompts"
         self.grounding = GroundingService()
         self.client = None
@@ -36,7 +56,10 @@ class OpenAIService:
             try:
                 from openai import OpenAI
 
-                self.client = OpenAI(api_key=self.api_key)
+                kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": 10.0}
+                if self.base_url:
+                    kwargs["base_url"] = self.base_url
+                self.client = OpenAI(**kwargs)
                 self.enabled = True
             except Exception:
                 self.client = None
@@ -45,6 +68,12 @@ class OpenAIService:
     @property
     def has_api_key(self) -> bool:
         return bool(self.api_key)
+
+    @classmethod
+    def for_dreaming(cls, provider: AIProvider) -> "OpenAIService":
+        """Create the generation service requested by the dream-model switch."""
+
+        return cls(provider=provider)
 
     def prompt(self, name: str) -> str:
         path = self.prompts_dir / f"{name}.md"
@@ -169,6 +198,26 @@ class OpenAIService:
                 f"terms mean. The part I am relying on is: \"{quote}\"."
             )
         return content + f"\n\nGrounded in section {section.id if section else 'unknown'}."
+
+    def complete(self, system_prompt: str, user_prompt: str, fallback: str, max_tokens: int = 700) -> str:
+        """Return text from the configured OpenAI-compatible provider or fallback."""
+
+        if not self.enabled or self.client is None:
+            return fallback
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content if response.choices else ""
+            return content.strip() or fallback
+        except Exception:
+            return fallback
 
     def decompose_query(self, query: str, context: dict[str, Any] | None = None) -> list[str]:
         terms = [part.strip() for part in re.split(r"\band\b|[;?]", query, flags=re.I) if part.strip()]
