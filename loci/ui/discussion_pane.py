@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from collections.abc import Callable
+from typing import Any
+from uuid import uuid4
+
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -28,6 +32,26 @@ from loci.services.storage_service import StorageService
 from loci.ui.widgets import Card, LabelValue
 
 
+class AgentTaskWorker(QObject):
+    """Run an agent task away from the Qt UI thread."""
+
+    finished = Signal(str, str, object)
+    failed = Signal(str, str, str)
+
+    def __init__(self, task_id: str, task_kind: str, task: Callable[[], object]) -> None:
+        super().__init__()
+        self.task_id = task_id
+        self.task_kind = task_kind
+        self.task = task
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.task_id, self.task_kind, self.task())
+        except Exception as exc:
+            self.failed.emit(self.task_id, self.task_kind, str(exc))
+
+
 class DiscussionPane(QWidget):
     """Threaded discussion plus durable multi-agent scratchpads."""
 
@@ -51,6 +75,7 @@ class DiscussionPane(QWidget):
         self.section_id: str | None = None
         self.thread_id: str | None = None
         self.document_id: str | None = None
+        self.agent_tasks: dict[str, tuple[QThread, AgentTaskWorker]] = {}
 
         self.title = QLabel("AGENTS")
         self.title.setObjectName("PaneTitle")
@@ -83,18 +108,18 @@ class DiscussionPane(QWidget):
         self.dream_provider_combo.addItem("Dream: LM Studio", "local")
         self.dream_provider_combo.addItem("Dream: OpenAI", "openai")
         self.dream_provider_combo.addItem("Dream: Fallback", "fallback")
-        ask_question = QPushButton("Ask / Run")
-        dream = QPushButton("Dream Cycle")
-        ask_question.clicked.connect(self._run_composer)
-        dream.clicked.connect(self._run_dream_cycle)
+        self.ask_question_button = QPushButton("Ask / Run")
+        self.dream_button = QPushButton("Dream Cycle")
+        self.ask_question_button.clicked.connect(self._run_composer)
+        self.dream_button.clicked.connect(self._run_dream_cycle)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(6)
         controls.addWidget(self.pipeline_combo)
         controls.addWidget(self.dream_provider_combo)
-        controls.addWidget(ask_question)
-        controls.addWidget(dream)
+        controls.addWidget(self.ask_question_button)
+        controls.addWidget(self.dream_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -157,12 +182,26 @@ class DiscussionPane(QWidget):
         self.storage.create_message(DiscussionMessage(thread_id=self.thread_id, actor="user", content=text))
         section = self.storage.get_section(self.section_id)
         scope = Scope(document_id=section.document_id if section else None, section_id=self.section_id)
-        result = self.pipeline_service.run(self.pipeline_combo.currentText(), text, scope)
+        pipeline = self.pipeline_combo.currentText()
+        thread_id = self.thread_id
+        self.input.clear()
+        self.refresh()
+
+        def task() -> dict[str, Any]:
+            result = self.pipeline_service.run(pipeline, text, scope)
+            return {"result": result, "thread_id": thread_id, "pipeline": pipeline}
+
+        self._start_agent_task("composer", task)
+
+    def _complete_composer_task(self, payload: dict[str, Any]) -> None:
+        result = payload["result"]
+        thread_id = payload["thread_id"]
+        pipeline = payload["pipeline"]
         entries = self.storage.list_scratchpad_entries(result.scratchpad_id)
         expert_entry = next((entry for entry in reversed(entries) if entry.actor in {"expert_agent", "synthesizer"}), None)
         self.storage.create_message(
             DiscussionMessage(
-                thread_id=self.thread_id,
+                thread_id=thread_id,
                 actor="expert_agent",
                 content=result.final_answer,
                 grounding=expert_entry.grounding if expert_entry else [],
@@ -170,12 +209,11 @@ class DiscussionPane(QWidget):
                 metadata={
                     "scratchpad_id": result.scratchpad_id,
                     "generated_document_id": result.generated_document_id,
-                    "pipeline": self.pipeline_combo.currentText(),
+                    "pipeline": pipeline,
                     "model": self.openai.model,
                 },
             )
         )
-        self.input.clear()
         self.refresh()
         self.messages_changed.emit()
 
@@ -184,9 +222,11 @@ class DiscussionPane(QWidget):
             return
         section = self.storage.get_section(self.section_id)
         scope = Scope(document_id=section.document_id if section else None, section_id=self.section_id)
-        self.orchestrator.run_dream_cycle(scope, max_iterations=10, provider=self._dream_provider())
-        self.refresh()
-        self.messages_changed.emit()
+        provider = self._dream_provider()
+        self._start_agent_task(
+            "dream",
+            lambda: self.orchestrator.run_dream_cycle(scope, max_iterations=10, provider=provider),
+        )
 
     def _ensure_dreaming(self) -> None:
         if not self.section_id:
@@ -194,6 +234,61 @@ class DiscussionPane(QWidget):
         existing = self.storage.list_scratchpads(kind="dream", section_id=self.section_id, limit=1)
         if not existing:
             self._run_dream_cycle()
+
+    def _start_agent_task(self, task_kind: str, task: Callable[[], object]) -> None:
+        if task_kind in self._running_task_kinds():
+            return
+        task_id = f"agent_task_{uuid4().hex}"
+        worker = AgentTaskWorker(task_id, task_kind, task)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._agent_task_finished)
+        worker.failed.connect(self._agent_task_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda task_id=task_id: self._cleanup_agent_task(task_id))
+        self.agent_tasks[task_id] = (thread, worker)
+        self._set_task_busy(task_kind, True)
+        thread.start()
+
+    def _agent_task_finished(self, task_id: str, task_kind: str, result: object) -> None:
+        if task_kind == "composer" and isinstance(result, dict):
+            self._complete_composer_task(result)
+        else:
+            self.refresh()
+            self.messages_changed.emit()
+        self._set_task_busy(task_kind, False)
+
+    def _agent_task_failed(self, task_id: str, task_kind: str, error: str) -> None:
+        if self.thread_id:
+            self.storage.create_message(
+                DiscussionMessage(
+                    thread_id=self.thread_id,
+                    actor="expert_agent",
+                    content=f"Agent task failed: {error}",
+                    metadata={"task_id": task_id, "task_kind": task_kind},
+                )
+            )
+        self.refresh()
+        self.messages_changed.emit()
+        self._set_task_busy(task_kind, False)
+
+    def _cleanup_agent_task(self, task_id: str) -> None:
+        if task := self.agent_tasks.pop(task_id, None):
+            task[0].deleteLater()
+
+    def _running_task_kinds(self) -> set[str]:
+        return {worker.task_kind for _thread, worker in self.agent_tasks.values()}
+
+    def _set_task_busy(self, task_kind: str, busy: bool) -> None:
+        if task_kind == "dream":
+            self.dream_button.setEnabled(not busy)
+            self.dream_button.setText("Dreaming..." if busy else "Dream Cycle")
+        if task_kind == "composer":
+            self.ask_question_button.setEnabled(not busy)
+            self.ask_question_button.setText("Working..." if busy else "Ask / Run")
 
     def _dream_provider(self) -> AIProvider:
         value = self.dream_provider_combo.currentData()
